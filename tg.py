@@ -122,6 +122,7 @@ class Mirror:
         try:
             self.update_progress("Starting mirror...\n2-15 min lag sakta hai")
 
+        # Start download
             self.download(self.url)
 
             if self.cancelled:
@@ -129,27 +130,51 @@ class Mirror:
                 return
 
             self.update_progress("Zipping files...")
-            
-        zip_path = f"{self.dir}.zip"
-        shutil.make_archive(str(self.dir), 'zip', str(self.dir))
-        
-        key = self.generate_key()
-        cloud_link = f"https://tg-ultimate-bot.onrender.com/scraped/{self.user_id}_{num}?key={key}"
-        
-        with open(f"{self.dir}/key.txt", "w") as f:
-            f.write(key)
-        
-        if users[self.user_id]["cloud_month"] < 2:
-            users[self.user_id]["cloud_month"] += 1
-            save_json(USERS_DB, users)
-            cloud_text = f"ᴄʟᴏᴜᴅ ʟɪɴᴋ:\n<code>{cloud_link}</code>\nᴋᴇʏ: <code>{key}</code>"
-        else:
-            cloud_text = "ᴄʟᴏᴜᴅ ʟɪᴍɪᴛ ᴏᴠᴇʀ (2/ᴍᴏɴᴛʜ)"
-        
-        with open(zip_path, 'rb') as f:
-            bot.send_document(self.chat_id, f, filename="TeamDev.sbs.zip",
-                caption=f"{BOX}ᴄʟᴏɴᴇᴅ!\nғɪʟᴇs: {self.file_count}\n{cloud_text}\n╚═════◇◆◇═════╝")
 
+        # Create ZIP
+            zip_path = f"{self.dir}.zip"
+            shutil.make_archive(str(self.dir), 'zip', str(self.dir))
+
+        # Generate secure key
+            key = self.generate_key()
+
+        # You used 'num' but never defined -> FIXED
+            num = str(int(time.time()))  # unique ID based on timestamp
+
+            cloud_link = f"https://tg-ultimate-bot.onrender.com/scraped/{self.user_id}_{num}?key={key}"
+
+        # Save key inside directory
+            with open(f"{self.dir}/key.txt", "w") as f:
+                f.write(key)
+
+        # Cloud monthly limit
+            if users[self.user_id]["cloud_month"] < 2:
+                users[self.user_id]["cloud_month"] += 1
+                save_json(USERS_DB, users)
+                cloud_text = (
+                    f"ᴄʟᴏᴜᴅ ʟɪɴᴋ:\n<code>{cloud_link}</code>\n"
+                    f"ᴋᴇʏ: <code>{key}</code>"
+                )
+            else:
+                cloud_text = "ᴄʟᴏᴜᴅ ʟɪᴍɪᴛ ᴏᴠᴇʀ (2/ᴍᴏɴᴛʜ)"
+
+        # Send ZIP to Telegram
+            with open(zip_path, 'rb') as f:
+                bot.send_document(
+                    self.chat_id,
+                    f,
+                    filename="TeamDev.sbs.zip",
+                    caption=(
+                        f"{BOX}ᴄʟᴏɴᴇᴅ!\n"
+                        f"ғɪʟᴇs: {self.file_count}\n"
+                        f"{cloud_text}\n"
+                        "╚═════◇◆◇═════╝"
+                    )
+                )
+
+        except Exception as e:
+            bot.send_message(self.chat_id, f"Error: {e}")
+        
 @bot.message_handler(func=lambda m: m.text and m.text.startswith("http"))
 def handle(m):
     if str(m.from_user.id) in active_tasks:
