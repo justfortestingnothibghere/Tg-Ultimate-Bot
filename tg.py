@@ -1,5 +1,6 @@
 # tg.py - TeamDev Mirror Bot v5.0 (With Daily + Monthly Limits)
 import telebot
+import telebot.types import InputFile
 import threading
 import os
 import shutil
@@ -233,8 +234,8 @@ class Mirror:
             with open(zip_path, 'rb') as f:
                 bot.send_document(
                     self.chat_id,
-                    f,
-                    filename="TeamDev.sbs.zip",
+                    InputFile(f,
+                    filename="TeamDev.sbs.zip"),
                     caption=(
                         f"{BOX}ᴄʟᴏɴᴇᴅ!\n"
                         f"ғɪʟᴇs: {self.file_count}\n"
