@@ -17,7 +17,7 @@ from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad, unpad
 
 # ===================== CONFIG =====================
-BOT_TOKEN = "8421219682:AAHLLb430Lf7V0UhB900B9e32dMNWj_CKLU"           # Change this
+BOT_TOKEN = "8573914754:AAGRVE6nVZpdzjwR1YK_1pzHx2gGH53DfMg"           # Change this
 ADMIN_ID = 7618637244                        # Your Telegram ID
 
 UPI_ID = "mr-arman-01@fam"                     # Your UPI
