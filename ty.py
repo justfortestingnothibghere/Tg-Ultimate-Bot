@@ -11,26 +11,30 @@ import time
 import logging
 from datetime import datetime, date
 import json
+import psutil
+import math
 
 # ================= CONFIG =================
 TOKEN = "7913272382:AAGnvD29s4bu_jmsejNmT5eWbl7HZnGy_OM"
 bot = telebot.TeleBot(TOKEN)
 
-# YOUR TELEGRAM ID (ADMIN)
-ADMIN_ID = 8163739723  # ← APNA ID YAHAN DAALO!!!
+# ADMIN ID
+ADMIN_ID = 8163739723
 
 DB_FILE = "users.json"
 DEFAULT_DAILY_LIMIT = 2
 MAX_SIZE_MB = 45
-HEADERS = {'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'}
+HEADERS = {'User-Agent': 'Mozilla/5.0 (Linux; Android 12; SM-S906N) AppleWebKit/537.36'}
 
 active_tasks = {}
+progress_messages = {}
 
 # =============== JSON DB ===============
 def load_db():
     if os.path.exists(DB_FILE):
         with open(DB_FILE, 'r') as f:
-            return json.load(f)
+            try: return json.load(f)
+            except: return {}
     return {}
 
 def save_db(db):
@@ -45,19 +49,16 @@ def get_user_data(user_id):
             "accepted_tc": False,
             "daily_used": 0,
             "last_date": None,
-            "custom_limit": DEFAULT_DAILY_LIMIT
+            "custom_limit": DEFAULT_DAILY_LIMIT,
+            "is_premium": False,
+            "joined_date": datetime.now().isoformat()
         }
         save_db(db)
     return db[user_id]
 
-def user_accepted_tc(user_id):
-    return get_user_data(user_id).get("accepted_tc", False)
-
 def accept_tc(user_id):
     user_id = str(user_id)
     db = load_db()
-    if user_id not in db:
-        db[user_id] = {}
     db[user_id]["accepted_tc"] = True
     save_db(db)
 
@@ -65,14 +66,12 @@ def reset_daily_if_needed(user_id):
     user_id = str(user_id)
     data = get_user_data(user_id)
     today = date.today().isoformat()
-    
     if data.get("last_date") != today:
         data["daily_used"] = 0
         data["last_date"] = today
         db = load_db()
         db[user_id].update(data)
         save_db(db)
-    
     return data
 
 def increment_usage(user_id):
@@ -83,44 +82,44 @@ def increment_usage(user_id):
     db[user_id].update(data)
     save_db(db)
 
-def set_user_limit(user_id, new_limit):
+def set_user_limit(user_id, limit, premium=False):
     user_id = str(user_id)
     db = load_db()
     if user_id not in db:
         db[user_id] = {"accepted_tc": True}
-    db[user_id]["custom_limit"] = new_limit
+    db[user_id]["custom_limit"] = limit
+    db[user_id]["is_premium"] = premium
     save_db(db)
 
-# =============== T&C MESSAGE ===============
-def send_tc_message(chat_id, user_id):
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("I Aᴄᴄᴇᴘᴛ T&C & Pʀɪᴠᴀᴄʏ Pᴏʟɪᴄʏ", callback_data="accept_tc"))
-    markup.add(telebot.types.InlineKeyboardButton("Cancel", callback_data="cancel_tc"))
+# =============== STYLISH T&C ===============
+def send_tc_message(chat_id):
+    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+    markup.add(telebot.types.InlineKeyboardButton("✅ I Accept T&C & Privacy Policy", callback_data="accept_tc"))
+    markup.add(telebot.types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_tc"))
 
     tc_text = (
-        "⚜️ T&C | Pʀɪᴠᴀᴄʏ Pᴏʟɪᴄʏ 👮‍♀️\n\n"
-        "Bʏ Usɪɴɢ Tʜɪs Bᴏᴛ, Yᴏᴜ Aɢʀᴇᴇ Tᴏ Tʜᴇ Fᴏʟʟᴏᴡɪɴɢ:\n\n"
-        "1. Yᴏᴜ Wɪʟʟ Oɴʟʏ Mɪʀʀᴏʀ Pᴜʙʟɪᴄ Wᴇʙsɪᴛᴇs (ɴᴏ ʟᴏɢɪɴ, ɴᴏ ᴘʀɪᴠᴀᴛᴇ ᴅᴀᴛᴀ)\n"
-        "2. Yᴏᴜ Wɪʟʟ Nᴏᴛ Usᴇ Tʜɪs Bᴏᴛ Fᴏʀ Iʟʟᴇɢᴀʟ Aᴄᴛɪᴠɪᴛɪᴇs\n"
-        "3. Wᴇ Dᴏ Nᴏᴛ Sᴛᴏʀᴇ Aɴʏ Pᴇʀsᴏɴᴀʟ Dᴀᴛᴀ Exᴄᴇᴘᴛ Yᴏᴜʀ Tᴇʟᴇɢʀᴀᴍ ID & Usᴀɢᴇ Cᴏᴜɴᴛ\n"
-        "4. Dᴏᴡɴʟᴏᴀᴅᴇᴅ Wᴇʙsɪᴛᴇs Aʀᴇ Tᴇᴍᴘᴏʀᴀʀɪʟʏ Sᴀᴠᴇᴅ Aɴᴅ Dᴇʟᴇᴛᴇᴅ Aғᴛᴇʀ Dᴇʟɪᴠᴇʀʏ\n"
-        "5. Mᴀx Fɪʟᴇ Sɪᴢᴇ: 45MB (Tᴇʟᴇɢʀᴀᴍ ʟɪᴍɪᴛ)\n"
-        "6. Dᴀɪʟʏ Lɪᴍɪᴛ: 2 Wᴇʙsɪᴛᴇs (ᴄᴀɴ ʙᴇ ɪɴᴄʀᴇᴀsᴇᴅ ʙʏ ᴀᴅᴍɪɴ)\n\n"
-        "Yᴏᴜʀ Dᴀᴛᴀ Is Sᴀғᴇ | Nᴏ Lᴏɢs | Fᴜʟʟʏ Pʀɪᴠᴀᴛᴇ\n\n"
+        "✨ *Terms & Conditions | Privacy Policy* ✨\n\n"
+        "By using this bot, you agree to:\n\n"
+        "• Only mirror *public websites*\n"
+        "• No login/private data scraping\n"
+        "• No illegal or harmful usage\n"
+        "• Max file size: 45MB\n"
+        "• Daily limit: 2 (upgradable)\n"
+        "• We store only your Telegram ID & usage stats\n"
+        "• All files deleted after delivery\n\n"
+        "Your data is safe • No logs • Fully private\n\n"
         "Made with ❤️ by @MR_ARMAN_08"
     )
 
-    photo = "https://graph.org/file/6bdddbc4b335597a86632-bbfc6792edbf4e2b21.jpg"  # ← YAHAN APNI T&C IMAGE DAALO
-
     bot.send_photo(
         chat_id,
-        photo,
+        "https://graph.org/file/6bdddbc4b335597a86632-bbfc6792edbf4e2b21.jpg",
         caption=tc_text,
         parse_mode='Markdown',
         reply_markup=markup
     )
 
-# =============== CALLBACK HANDLER ===============
+# =============== CALLBACKS ===============
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     if call.data == "accept_tc":
@@ -128,202 +127,160 @@ def callback_handler(call):
         bot.edit_message_caption(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            caption="Aᴄᴄᴇᴘᴛᴇᴅ! Nᴏᴡ Yᴏᴜ Cᴀɴ Usᴇ Tʜᴇ Bᴏᴛ!\n\nSend /start",
+            caption="✅ *Accepted!* Now you can use the bot!\n\nSend /start to begin",
             parse_mode='Markdown'
         )
-        bot.answer_callback_query(call.id, "Accepted! Welcome!")
-    
+        bot.answer_callback_query(call.id, "Welcome! 🚀")
     elif call.data == "cancel_tc":
         bot.edit_message_caption(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            caption="Yoᥙ Dᥱᥴᥣιnᥱd T&C.\nBᴏᴛ Wɪʟʟ Nᴏᴛ Wᴏʀᴋ Uɴᴛɪʟ Yᴏᴜ Aᴄᴄᴇᴘᴛ.",
+            caption="❌ You declined T&C.\nBot will not work until accepted.",
             parse_mode='Markdown'
         )
-        bot.answer_callback_query(call.id, "Declined")
 
 # =============== KEYBOARDS ===============
-def start_keyboard():
+def main_keyboard():
     markup = telebot.types.InlineKeyboardMarkup()
     markup.row(
-        telebot.types.InlineKeyboardButton("Group", url="https://t.me/team_x_og"),
-        telebot.types.InlineKeyboardButton("Website", url="https://teamdev.sbs")
+        telebot.types.InlineKeyboardButton("👥 Group", url="https://t.me/team_x_og"),
+        telebot.types.InlineKeyboardButton("🌐 Website", url="https://teamdev.sbs")
     )
+    markup.add(telebot.types.InlineKeyboardButton("📊 My Stats", callback_data="my_stats"))
     return markup
+
+# =============== PROGRESS BAR ===============
+def create_progress_bar(percentage, length=20):
+    filled = "█" 
+    empty = "░"
+    filled_count = int(length * percentage // 100)
+    bar = filled * filled_count + empty * (length - filled_count)
+    return f"{bar} {percentage}%"
+
+# =============== ADMIN PANEL ===============
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if message.from_user.id != ADMIN_ID:
+        return bot.reply_to(message, "⛔ *Access Denied!* Only admin can use this.", parse_mode='Markdown')
+    
+    text = (
+        "🔧 *Admin Panel*\n\n"
+        "👥 Total Users: `{}`\n"
+        "🗂 DB Size: `{:.2f} KB`\n"
+        "💾 RAM Usage: `{:.1f}%`\n\n"
+        "*Commands:*\n"
+        "/users - List all users\n"
+        "/broadcast - Send message to all\n"
+        "/stats - Bot statistics\n"
+        "/limit <id> <limit> - Set user limit\n"
+        "/premium <id> - Make premium\n"
+        "/resetuser <id> - Reset usage"
+    ).format(
+        len(load_db()),
+        os.path.getsize(DB_FILE)/1024 if os.path.exists(DB_FILE) else 0,
+        psutil.virtual_memory().percent
+    )
+    
+    bot.send_message(message.chat.id, text, parse_mode='Markdown')
+
+@bot.message_handler(commands=['stats'])
+def stats(message):
+    if message.from_user.id != ADMIN_ID: return
+    db = load_db()
+    premium = sum(1 for u in db.values() if u.get("is_premium"))
+    bot.reply_to(message, f"📊 *Bot Stats*\n\nTotal Users: {len(db)}\nPremium Users: {premium}\nActive Tasks: {len(active_tasks)}", parse_mode='Markdown')
+
+@bot.message_handler(commands=['premium'])
+def make_premium(message):
+    if message.from_user.id != ADMIN_ID: return
+    try:
+        user_id = int(message.text.split()[1])
+        set_user_limit(user_id, 50, premium=True)
+        bot.reply_to(message, f"✅ User {user_id} is now *Premium* (50/day)", parse_mode='Markdown')
+    except: bot.reply_to(message, "Usage: /premium user_id")
 
 # =============== COMMANDS ===============
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-
-    if not user_accepted_tc(user_id):
-        send_tc_message(message.chat.id, user_id)
+    if not get_user_data(user_id).get("accepted_tc", False):
+        send_tc_message(message.chat.id)
         return
 
-    photo = "https://graph.org/file/6bdddbc4b335597a86632-bbfc6792edbf4e2b21.jpg"  # ← MAIN BOT IMAGE
-
     caption = (
-        "Wᴇʙsɪᴛᴇ Mɪʀʀᴏʀ Bᴏᴛ - LIVE!\n\n"
-        "Mᴀɪɴ Kɪsɪ Bʜɪ Pᴜʙʟɪᴄ Wᴇʙsɪᴛᴇ Kᴏ Pᴏᴏʀᴀ Cʟᴏɴᴇ Kᴀʀᴋᴇ ZIP Dᴇᴛᴀ Hᴏᴏɴ\n"
-        "Bʜᴇᴊᴏ URL → ZIP Mɪʟ Jᴀᴀʏᴇɢᴀ\n"
-        "Example: `https://httpbin.org`\n\n"
-        f"Dᴀɪʟʏ Lɪᴍɪᴛ: 2 sɪᴛᴇs (Aᴅᴍɪɴ Bᴀᴅʜᴀ Sᴀᴋᴛᴀ Gᴀɪ)\n\n"
-        "Made by @MR_ARMAN_08"
+        "🌟 *Website Mirror Bot - LIVE & FAST!* 🌟\n\n"
+        "🔥 Main kisi bhi public website ko *full offline clone* banata hoon!\n"
+        "Just send URL → Get ZIP\n\n"
+        "✨ Example: `https://httpbin.org`\n"
+        "⚡ Max Size: 45MB | Daily Limit: 2 (Upgradable)\n\n"
+        "Made with ❤️ by @MR_ARMAN_08"
     )
 
     bot.send_photo(
         message.chat.id,
-        photo,
+        "https://graph.org/file/6bdddbc4b335597a86632-bbfc6792edbf4e2b21.jpg",
         caption=caption,
         parse_mode='Markdown',
-        reply_markup=start_keyboard()
+        reply_markup=main_keyboard()
     )
 
-@bot.message_handler(commands=['help'])
-def help_cmd(message):
-    if not user_accepted_tc(message.from_user.id):
-        bot.reply_to(message, "Pehle T&C Accept Karo!")
-        send_tc_message(message.chat.id, message.from_user.id)
-        return
-
-    bot.reply_to(message, (
-        "*Help*\n\n"
-        "/start - Bot start\n"
-        "/help - Yeh message\n"
-        "/cancel - Task cancel\n\n"
-        "Bas URL bhejo → ZIP milega!\n"
-        "Support: @team_x_og"
-    ), parse_mode='Markdown')
-
-@bot.message_handler(commands=['limit'])
-def set_limit(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "Sirf admin use kar sakta hai")
-        return
-    
-    try:
-        args = message.text.split()
-        target_id = int(args[1])
-        limit = int(args[2])
-        if 1 <= limit <= 100:
-            set_user_limit(target_id, limit)
-            bot.reply_to(message, f"User {target_id} → {limit}/day")
-        else:
-            bot.reply_to(message, "Limit 1-100 ke beech")
-    except:
-        bot.reply_to(message, "Usage: /limit user_id limit")
-
-def zip_current_directory(zip_name):
-    base_path = Path.cwd()  # ← current directory
-    with zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for file in base_path.rglob("*"):
-            # Skip the zip itself to avoid recursion
-            if file.name == zip_name:
-                continue
-            zipf.write(file, file.relative_to(base_path))
-    return zip_name
-
-# -----------------------------
-# /adnd COMMAND
-# -----------------------------
-@bot.message_handler(commands=['adnd'])
-def handle_adnd(message):
-    if message.chat.id != ADMIN_ID:
-        return bot.reply_to(message, "❌ Only admin allowed.")
-
-    zip_name = "backup.zip"
-    bot.reply_to(message, "📦 Creating ZIP...")
-
-    try:
-        zip_current_directory(zip_name)
-        bot.send_document(ADMIN_ID, open(zip_name, "rb"))
-    except Exception as e:
-        bot.reply_to(message, f"❌ Error: {e}")
-
-# -----------------------------
-# AUTO SEND ZIP EVERY 5 MIN
-# -----------------------------
-def auto_send_backup():
-    zip_name = "backup.zip"
-
-    while True:
-        try:
-            zip_current_directory(zip_name)
-            bot.send_document(
-                ADMIN_ID,
-                open(zip_name, "rb"),
-                caption="⏱ Auto Backup (Every 5 Min)"
-            )
-        except Exception as e:
-            print("Auto backup error:", e)
-
-        time.sleep(300)  # 5 minutes
-
-
-# Start auto thread
-
-
 @bot.message_handler(commands=['cancel'])
-def cancel(message):
-    if not user_accepted_tc(message.from_user.id):
-        bot.reply_to(message, "T&C accept karo pehle!")
-        return
-    
+def cancel_task(message):
     user_id = message.from_user.id
-    if user_id in active_tasks and not active_tasks[user_id]['cancelled']:
+    if user_id in active_tasks:
         active_tasks[user_id]['cancelled'] = True
-        bot.reply_to(message, "Task cancelled!")
+        bot.reply_to(message, "🛑 *Task Cancelled Successfully!*", parse_mode='Markdown')
     else:
-        bot.reply_to(message, "Koi task nahi chal raha")
+        bot.reply_to(message, "❌ No active task to cancel.")
 
-# =============== BLOCK IF NOT ACCEPTED ===============
+# =============== MAIN MIRROR HANDLER ===============
 @bot.message_handler(func=lambda m: True)
-def handle_all_messages(message):
+def handle_url(message):
     user_id = message.from_user.id
-
-    # Block if not accepted T&C
-    if not user_accepted_tc(user_id):
-        send_tc_message(message.chat.id, user_id)
-        bot.reply_to(message, "T&C accept karo pehle! Bot tabhi kaam karega")
+    if not get_user_data(user_id).get("accepted_tc", False):
+        send_tc_message(message.chat.id)
         return
 
-    # If accepted, then process URL
     url = message.text.strip()
     if not url.startswith(('http://', 'https://')):
-        bot.reply_to(message, "Valid URL bhejo:\nhttps://example.com")
-        return
+        return bot.reply_to(message, "❌ Please send a valid URL!\nExample: https://example.com")
 
     if user_id in active_tasks:
-        bot.reply_to(message, "Ek time pe ek hi site!")
-        return
+        return bot.reply_to(message, "⏳ *One task at a time!* Please wait...", parse_mode='Markdown')
 
-    # Daily Limit Check
     data = reset_daily_if_needed(user_id)
-    current_limit = data.get("custom_limit", DEFAULT_DAILY_LIMIT)
-    if data["daily_used"] >= current_limit:
-        bot.reply_to(message, f"Daily limit khatam! ({data['daily_used']}/{current_limit})\nKal try karo ya admin se badhwa lo")
-        return
+    limit = 50 if data.get("is_premium") else data.get("custom_limit", DEFAULT_DAILY_LIMIT)
+    if data["daily_used"] >= limit:
+        return bot.reply_to(message, f"🚫 *Daily Limit Exceeded!* ({data['daily_used']}/{limit})\nTry tomorrow or ask admin for upgrade!", parse_mode='Markdown')
 
-    progress_msg = bot.reply_to(message, "Starting mirror...")
+    # Start Progress
+    progress_msg = bot.reply_to(message, 
+        "🚀 *Starting Mirror...*\n\n"
+        "⏳ Please wait 2-15 minutes...\n"
+        "You will get ZIP when done!",
+        parse_mode='Markdown'
+    )
+    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = f"mirrors/user_{user_id}_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
 
     mirror = WebsiteMirror(url, output_dir, message.chat.id, progress_msg.message_id, user_id)
-    active_tasks[user_id] = {'cancelled': False}
+    active_tasks[user_id] = {'cancelled': False, 'mirror': mirror}
 
-    def run():
+    def run_mirror():
         try:
-            mirror.cancelled = active_tasks[user_id]['cancelled']
-            mirror.mirror()
-            if not mirror.cancelled:
+            mirror.run()
+            if not active_tasks[user_id]['cancelled']:
                 increment_usage(user_id)
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Error: {str(e)}")
         finally:
             active_tasks.pop(user_id, None)
 
-    threading.Thread(target=run, daemon=True).start()
+    threading.Thread(target=run_mirror, daemon=True).start()
 
-# =============== MIRROR CLASS (Same as before) ===============
+# =============== UPGRADED MIRROR CLASS ===============
 class WebsiteMirror:
     def __init__(self, url, output_dir, chat_id, msg_id, user_id):
         self.url = url.rstrip("/") + "/"
@@ -333,102 +290,83 @@ class WebsiteMirror:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.visited = set()
         self.file_count = 0
+        self.total_files = 0
         self.chat_id = chat_id
         self.msg_id = msg_id
         self.user_id = user_id
-        self.cancelled = False
+        self.start_time = time.time()
 
-    def normalize_path(self, url):
-        parsed = urlparse(url)
-        path = unquote(parsed.path)
-        if not path or path.endswith('/'):
-            path = path + 'index.html' if path else 'index.html'
-        elif '.' not in Path(path).name:
-            path = path + '/index.html' if path.endswith('/') else path + '.html'
-        return path.lstrip('/')
+    def update_progress(self, status="", percentage=0):
+        if self.user_id not in active_tasks or active_tasks[self.user_id]['cancelled']:
+            return
+        elapsed = int(time.time() - self.start_time)
+        mins, secs = divmod(elapsed, 60)
+        bar = create_progress_bar(percentage)
+        
+        text = (
+            f"🔄 *Mirroring in Progress...*\n\n"
+            f"{bar}\n"
+            f"📊 Files: `{self.file_count}`\n"
+            f"⏱ Time: `{mins}m {secs}s`\n"
+            f"🌐 Domain: `{self.domain}`\n\n"
+            f"Status: {status or 'Downloading assets...'}"
+        )
+        try:
+            bot.edit_message_text(text, self.chat_id, self.msg_id, parse_mode='Markdown')
+        except: pass
 
     def save_file(self, content, file_path):
-        if self.cancelled: return False
         full_path = self.output_dir / file_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
         with open(full_path, 'wb') as f:
             f.write(content)
         self.file_count += 1
-        return True
 
-    def update_progress(self, text):
-        if self.cancelled: return
+    def run(self):
         try:
-            bot.edit_message_text(text, self.chat_id, self.msg_id, parse_mode='HTML')
-        except:
-            pass
-
-    def download(self, url):
-        if self.cancelled or url in self.visited: return
-        self.visited.add(url)
-        if urlparse(url).scheme not in ['http', 'https']: return
-
-        try:
-            time.sleep(0.3)
-            r = requests.get(url, headers=HEADERS, timeout=20, allow_redirects=True)
-            r.raise_for_status()
-            final_url = r.url
-            path = self.normalize_path(final_url)
-
-            if self.file_count % 10 == 0 and self.file_count > 0:
-                self.update_progress(f"Downloading...\n<b>{self.file_count}</b> files\nLast: {urlparse(final_url).path[:50]}...")
-
-            ctype = r.headers.get('Content-Type', '') or ''
-            if 'text/html' in ctype or not Path(path).suffix:
-                if not path.endswith(('.html', '.htm')):
-                    path = path.rstrip('/') + '/index.html' if '/' in path else path + '.html'
-                if not self.save_file(r.content, path): return
-                soup = BeautifulSoup(r.text, 'html.parser')
-                for tag in soup.find_all(['a', 'link', 'script', 'img', 'source']):
-                    link = tag.get('href') or tag.get('src')
-                    if link and not link.startswith(('mailto:', 'tel:', 'javascript:', '#')):
-                        abs_url = urljoin(final_url, link.split('#')[0].split('?')[0])
-                        if urlparse(abs_url).netloc in [self.domain, '']:
-                            if abs_url not in self.visited:
-                                self.download(abs_url)
-            else:
-                self.save_file(r.content, path)
-        except:
-            pass
-
-    def mirror(self):
-        try:
-            self.update_progress("Starting mirror... (2-15 min)")
+            self.update_progress("Initializing...", 5)
             self.download(self.url)
-            if self.cancelled:
-                self.update_progress("Cancelled")
+            
+            if active_tasks[self.user_id]['cancelled']:
+                self.update_progress("❌ Cancelled by user", 100)
                 return
 
-            self.update_progress("Zipping...")
+            self.update_progress("Compressing files...", 90)
             zip_path = f"{self.base_dir}_{self.domain}.zip"
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for root, _, files in os.walk(self.output_dir):
                     for file in files:
-                        if self.cancelled: break
+                        if active_tasks[self.user_id]['cancelled']: break
                         fp = os.path.join(root, file)
                         zf.write(fp, os.path.relpath(fp, self.base_dir))
 
-            if self.cancelled or not os.path.exists(zip_path): return
+            if active_tasks[self.user_id]['cancelled']: return
 
             size_mb = os.path.getsize(zip_path) / (1024*1024)
             if size_mb > MAX_SIZE_MB:
-                self.update_progress(f"ZIP bada hai ({size_mb:.1f} MB)\nChhoti site daal!")
+                self.update_progress(f"❌ Too large ({size_mb:.1f}MB)", 100)
+                bot.send_message(self.chat_id, "❌ Website too big! Try smaller site.")
                 return
 
-            self.update_progress("Uploading...")
+            self.update_progress("Uploading to Telegram...", 95)
             with open(zip_path, 'rb') as f:
-                bot.send_document(self.chat_id, f,
-                    caption=f"Cloned!\nFiles: {self.file_count}\nURL: {self.url}\nOffline Ready!")
-
-            bot.send_message(self.chat_id, "Done! Website offline chalegi")
-
+                bot.send_document(
+                    self.chat_id,
+                    f,
+                    caption=(
+                        f"✅ *Website Cloned Successfully!*\n\n"
+                        f"📦 Files: `{self.file_count}`\n"
+                        f"💾 Size: `{size_mb:.2f} MB`\n"
+                        f"🔗 URL: `{self.url}`\n"
+                        f"⏰ Time: `{int(time.time()-self.start_time)}s`\n\n"
+                        f"Now works 100% offline! 🔥"
+                    ),
+                    parse_mode='Markdown'
+                )
+            bot.send_message(self.chat_id, "🎉 *Done!* Your offline website is ready!", parse_mode='Markdown')
+            
         except Exception as e:
-            bot.send_message(self.chat_id, "Error ho gaya. Chhoti site try karo.")
+            bot.send_message(self.chat_id, f"❌ Failed: {str(e)}")
         finally:
             shutil.rmtree(self.base_dir, ignore_errors=True)
             for f in os.listdir('.'):
@@ -436,13 +374,44 @@ class WebsiteMirror:
                     try: os.remove(f)
                     except: pass
 
+    def download(self, url):
+        if self.user_id not in active_tasks or active_tasks[self.user_id]['cancelled']:
+            return
+        if url in self.visited: return
+        self.visited.add(url)
 
-threading.Thread(target=auto_send_backup, daemon=True).start()
+        try:
+            time.sleep(0.3)
+            r = requests.get(url, headers=HEADERS, timeout=25, allow_redirects=True)
+            r.raise_for_status()
+            path = self.normalize_path(r.url)
 
+            self.update_progress(f"Downloading: {Path(path).name[:30]}...", 
+                              min(85, 10 + len(self.visited)*5))
 
-# =============== START ===============
+            if 'text/html' in r.headers.get('Content-Type', '') or not Path(path).suffix:
+                self.save_file(r.content, path)
+                soup = BeautifulSoup(r.text, 'html.parser')
+                for tag in soup.find_all(['a', 'link', 'script', 'img', 'source']):
+                    link = tag.get('href') or tag.get('src')
+                    if link and not link.startswith(('mailto:', 'tel:', 'javascript:', '#')):
+                        abs_url = urljoin(url, link.split('#')[0].split('?')[0])
+                        if urlparse(abs_url).netloc == self.domain:
+                            self.download(abs_url)
+            else:
+                self.save_file(r.content, path)
+        except: pass
+
+    def normalize_path(self, url):
+        parsed = urlparse(url)
+        path = unquote(parsed.path)
+        if not path or path.endswith('/'):
+            path = path + 'index.html' if path else 'index.html'
+        return path.lstrip('/')
+
+# =============== START BOT ===============
 if not os.path.exists("mirrors"):
     os.makedirs("mirrors")
 
-print("Professional Mirror Bot with T&C - Running!")
-bot.infinity_polling()
+print("🚀 Ultimate Mirror Bot v2.0 - Running with Style!")
+bot.infinity_polling(none_stop=True)
